@@ -1,0 +1,198 @@
+#include <Adafruit_NeoPixel.h>
+#include "BluetoothSerial.h"
+#include <WiFi.h>
+#include <ESP32Servo.h>
+#include "DHT.h"
+#include <HTTPClient.h>
+#define DHTPIN 5  
+#define SOUND_SPEED 0.034
+#define NEOLED 15
+#define DHTTYPE DHT22 
+#define LED_HUMIDITY 17
+#define LIGHT_SENSOR 13
+#define SONOR_ECHO 27
+#define SONOR_TRIG 26
+#define LEFT_WING 25
+#define RIGHT_WING 12
+
+#define ALARM_WARNING 32
+
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+
+
+//Check bluetooth si activé ou pas.
+#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
+#error Bluetooth is not enabled! Please run `make menuconfig` to and enable it
+#endif
+
+DHT dht(DHTPIN, DHTTYPE);
+Servo wingLeft;
+Servo wingRight;
+
+//WiFi Credentials
+const char* ssid = "OPPO A92";
+const char* password = "12345677";
+
+
+String serverName = "http://monappli.ovh:58015/pilotageApp/synchroData";
+
+BluetoothSerial SerialBT;
+
+
+void setup() {
+
+  Serial.begin(9600);
+  Serial.println(F("DHTxx test!"));
+  pinMode(LED_HUMIDITY, OUTPUT);
+  pinMode(SONOR_ECHO, INPUT);
+  pinMode(SONOR_TRIG, OUTPUT);
+  SerialBT.begin("ESP32test");
+
+  pinMode(ALARM_WARNING, OUTPUT);
+
+
+  //digitalWrite(LED_VISION, HIGH);
+
+  //WiFi Connection
+   WiFi.mode(WIFI_STA); //Optional
+    WiFi.begin(ssid, password);
+    Serial.println("\nConnecting");
+
+    while(WiFi.status() != WL_CONNECTED){
+        Serial.print(".");
+        delay(100);
+    }
+
+    Serial.println("\nConnected to the WiFi network");
+    Serial.print("Local ESP32 IP: ");
+    Serial.println(WiFi.localIP());
+
+  dht.begin();
+  wingLeft.attach(LEFT_WING, 500, 2400);
+  wingRight.attach(RIGHT_WING, 500, 2400); 
+}
+
+void loop() {
+ 
+
+// Wait a few seconds between measurements.
+  //digitalWrite(LED_VISION_PULSE, LOW);
+ // digitalWrite(LED_WARNING, LOW);
+  delay(500);
+  //digitalWrite(LED_VISION_PULSE, HIGH);
+
+  // Calculate the distance
+  digitalWrite(SONOR_TRIG, HIGH);
+  delay(10);
+  digitalWrite(SONOR_TRIG, LOW);
+  //float duration = pulseIn(SONOR_ECHO, HIGH);
+  //float distanceCm = duration * SOUND_SPEED/2;
+  Serial.print("Distance de collision : ");
+ // Serial.println(distanceCm);
+
+  // Calculate the altitude
+  digitalWrite(SONOR_TRIG, HIGH);
+  delay(10);
+  digitalWrite(SONOR_TRIG, LOW);
+  float durationAltitude = pulseIn(SONOR_ECHO, HIGH);
+  float altitude = durationAltitude * SOUND_SPEED/2;
+  Serial.print("Altitude : ");
+  Serial.println(altitude);
+
+
+  // READ light sensor value
+  int light_sensor = digitalRead(LIGHT_SENSOR);
+  Serial.print("Nuit/Jour : ");
+  Serial.println(light_sensor);
+  if (light_sensor == 1) {
+   //digitalWrite(LED_VISION, HIGH);
+  }
+  else
+  {
+   // digitalWrite(LED_VISION, LOW);
+  }
+
+  // Reading temperature or humidity takes about 250 milliseconds!
+  // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
+  float h = dht.readHumidity();
+  // Read temperature as Celsius (the default)
+  float t = dht.readTemperature();
+  // Check if any reads failed and exit early (to try again).
+  if (isnan(h) || isnan(t)) {
+    Serial.println(F("Failed to read from DHT sensor!"));
+  }
+  // allumage de la led en cas de forte humidité
+  if (h > 90) {
+    digitalWrite(LED_HUMIDITY, HIGH);
+  }
+  else
+  {
+    digitalWrite(LED_HUMIDITY, LOW);
+  }
+  /*if (t < 0) {
+    digitalWrite(LED_TEMP, HIGH);
+  }
+  else
+  {
+    digitalWrite(LED_TEMP, LOW);
+  }*/
+
+  // verifie si l'avion est proche du sol en allumant une LED
+ 
+
+
+  if (altitude < 50){
+    tone(ALARM_WARNING, 440, 250);
+    wingLeft.write(60);
+    wingRight.write(120);
+  }else{
+    wingLeft.write(0);
+    wingRight.write(0);
+  }
+
+
+  if(WiFi.status()== WL_CONNECTED){
+        
+      WiFiClient client;
+      HTTPClient http;
+    
+      // Your Domain name with URL path or IP address with path
+      http.begin(client, serverName);
+      
+      // If you need Node-RED/server authentication, insert user and password below
+      //http.setAuthorization("REPLACE_WITH_SERVER_USERNAME", "REPLACE_WITH_SERVER_PASSWORD");
+      
+      // Specify content-type header
+     // http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+      // Data to send with HTTP POST
+     // String httpRequestData = "api_key=tPmAT5Ab3j7F9&sensor=BME280&value1=24.25&value2=49.54&value3=1005.14";           
+      // Send HTTP POST request
+      //int httpResponseCode = http.POST(httpRequestData);
+      float temperature = 5.0;
+      float humidite = 9.0;
+      // If you need an HTTP request with a content type: application/json, use the following:
+      http.addHeader("Content-Type", "application/json");
+      String data = "{\"temperature\":" + String(temperature) + ",\"humidite\":" + String(humidite) + ",\"altitude\":" + String(altitude) + ",\"lumiere\":" + String(light_sensor) + "}";
+
+      Serial.print(data);
+      int httpResponseCode = http.POST(data);
+
+      // If you need an HTTP request with a content type: text/plain
+      //http.addHeader("Content-Type", "text/plain");
+      //int httpResponseCode = http.POST("Hello, World!");
+     
+      Serial.print("HTTP Response code: ");
+      Serial.println(httpResponseCode);
+        
+      // Free resources
+      http.end();
+  
+
+  Serial.print(F("Humidity: "));
+  Serial.print(h);
+  Serial.print(F("%  Temperature: "));
+  Serial.print(t);
+  Serial.println(F("°C "));
+}
+}
